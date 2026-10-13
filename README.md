@@ -8,8 +8,6 @@ esopen is a single Python file that turns Apple's built-in Endpoint Security log
 
 ## Install
 
-### Let your AI agent do it
-
 Paste this into Claude Code, Codex, Cursor, ChatGPT or any AI assistant:
 
 ```
@@ -17,25 +15,6 @@ Install and start esopen on my Mac by following https://raw.githubusercontent.co
 ```
 
 The agent handles everything except two things only you can do: typing your Mac password, and turning on one switch in System Settings.
-
-### Or run one command
-
-1. **Give your terminal Full Disk Access.** Open System Settings → Privacy & Security → Full Disk Access, turn on the terminal app you use (Terminal, iTerm, Ghostty…), then quit and reopen it. macOS only lets Endpoint Security run from apps that have this permission.
-2. **Paste this into that terminal:**
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/sincethestudy/esopen/main/run.sh | bash
-   ```
-3. **Enter your Mac password** when asked. The viewer opens in your browser.
-
-Press `Ctrl+C` in the terminal to stop. Next time, just run `python3 ~/.esopen/esopen.py`.
-
-Want to look around first? Add `-s -- --demo` to see fake data without a password:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sincethestudy/esopen/main/run.sh | bash -s -- --demo
-```
-
-You need macOS 13 (Ventura) or newer and an admin account. If macOS offers to install developer tools when Python runs, click Install. It's a one-time download that includes Python. You'd rather read the code first? Download [`esopen.py`](esopen.py) and run `python3 esopen.py`.
 
 ## What you get
 
@@ -52,6 +31,7 @@ You need macOS 13 (Ventura) or newer and an admin account. If macOS offers to in
 - **Findings**, ranked High, Medium and Low:
   - a non-Apple app opening your Messages, Mail, Contacts, Notes or the privacy-permissions database
   - an app opening another app's saved passwords, cookies or browsing history
+  - access to crypto wallets (MetaMask, Coinbase Wallet, Phantom, Exodus, Electrum…)
   - access to SSH keys, cloud credentials, `.env` files or your Photos library
   - apps reading other apps' private folders
   - programs running from hidden or temporary folders, or without a developer signature

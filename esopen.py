@@ -46,6 +46,10 @@ PLACES = [
     ("browser", "Browser passwords, cookies & history", "browser passwords, cookies or history", "high",
      r"/(?:Login Data|Login Data For Account|Cookies|History|Web Data|key4\.db|logins\.json|cookies\.sqlite|places\.sqlite)"
      r"(?:-journal|-wal)?$|/Library/Safari/|/Library/Cookies/"),
+    ("wallets", "Crypto wallets", "crypto wallet data", "high",
+     r"/Local Extension Settings/(?:nkbihfbeogaeaoehlefnkodbefgpgknn|hnfanknocfeofbddgcijnmhnfnkdnaad|bfnaelmomeimhlpmgjnjophhpkkoljpa"
+     r"|acmacodkjbdgmoleebolmdjonilkdbch|egjidjbpglichdcondbcbdnbeeppgdph)/"
+     r"|/Application Support/(?:Exodus|atomic|Ledger Live|Bitcoin/wallets|Guarda|Coinomi)/|/\.electrum/"),
     ("secrets", "SSH keys & developer secrets", "SSH keys or developer secrets", "medium",
      r"/\.(?:ssh|aws|gnupg|kube|docker)/|/\.config/(?:gh|gcloud)/|/\.(?:netrc|git-credentials|npmrc|pypirc)$|/\.env(?:\.[\w-]+)?$"),
     ("photos", "Photos library", "Photos library", "medium", r"\.photoslibrary/"),
@@ -56,6 +60,7 @@ PLACES = [
 ]
 ANY_PLACE = re.compile("|".join("(?P<%s>%s)" % (p[0], p[4]) for p in PLACES))
 PLACE_SEV = {p[0]: p[3] for p in PLACES}
+ESCALATE = {"low": "medium", "medium": "high"}  # for unsigned programs running from odd places
 PLACE_SHORT = {p[0]: p[2] for p in PLACES}
 
 PERSIST = re.compile(r"/Library/(?:LaunchAgents|LaunchDaemons|StartupItems)/|^/Users/[^/]+/\.(?:zshrc|zprofile|zshenv|zlogin|"
@@ -169,12 +174,16 @@ class Insights:
                     rel = path[len(self.home):] if path.startswith(self.home + "/") else path
                     a = place["apps"].get(e["exe"])
                     if a is None:
-                        a = place["apps"][e["exe"]] = {"count": 0, "writes": 0, "own": self._owns(info, rel)}
+                        a = place["apps"][e["exe"]] = {"count": 0, "writes": 0, "other": 0}
                     a["count"] += 1
                     if e["ff"] & 2:
                         a["writes"] += 1
-                    if not a["own"]:
-                        self._hit("place", key, e, PLACE_SEV[key])
+                    if not self._owns(info, rel):
+                        a["other"] += 1
+                        sev = PLACE_SEV[key]
+                        if info["loc"] in ("high", "medium"):
+                            sev = ESCALATE.get(sev, sev)
+                        self._hit("place", key, e, sev)
             elif not e["plat"]:
                 m2 = LIB_AREA.match(path)
                 if m2 and not SHARED_AREA.match(m2.group(2)) and not self._owns(info, m2.group(2)):
@@ -200,7 +209,7 @@ class Insights:
             places = []
             for key, label, _, sev, _ in PLACES:
                 p = self.places[key]
-                apps = sorted(({"name": self.exes[x]["name"], "count": a["count"], "writes": a["writes"], "own": a["own"]}
+                apps = sorted(({"name": self.exes[x]["name"], "count": a["count"], "writes": a["writes"], "own": not a["other"]}
                                for x, a in p["apps"].items()), key=lambda a: -a["count"])[:8]
                 places.append({"key": key, "label": label, "sev": sev, "total": p["total"], "apple": p["apple"], "apps": apps})
             out = {"since": self.started * 1000, "events": self.events, "programs": len(self.exes),
@@ -460,14 +469,41 @@ def run_demo(hub):
              ["/usr/lib/{dylib}", "/System/Library/dyld/dyld_shared_cache_arm64e"], ephemeral=True),
         prof("/System/Applications/Messages.app/Contents/MacOS/Messages", "com.apple.MobileSMS", None, True, me, 1, 0.3,
              [H + "/Library/Messages/chat.db", H + "/Library/Messages/chat.db-wal"]),
-        # A made-up sketchy background program, so the Insights tab has something to show in demo mode.
-        prof("/Users/Shared/.sync/syncd", "syncd-55554944", None, False, me, 1, 0.0,
-             [H + "/Library/Messages/chat.db", H + "/Library/Application Support/Google/Chrome/Default/Login Data",
-              H + "/Library/Application Support/com.apple.TCC/TCC.db", H + "/.ssh/id_ed25519",
-              H + "/Library/LaunchAgents/com.sync.agent.plist"]),
     ]
-    weights = [p["weight"] for p in profiles]
     bursty = [p for p in profiles if p["exe"].endswith(("/git", "/node", "mds_stores", "Helper"))]
+
+    # Made-up bad actors (all names fictional) so the Insights tab has something to show in demo mode.
+    syncd, scribe = "/Users/Shared/.sync/syncd", "/Applications/Acme Scribe AI.app/Contents/MacOS/Acme Scribe AI"
+    pdf = "/Applications/Acme PDF Converter.app/Contents/Library/LoginItems/PDFHelper.app/Contents/MacOS/PDFHelper"
+    dl_node, updater = H + "/Downloads/setup-tools/bin/node", H + "/Library/Application Support/.updater/UpdateHelper"
+    profiles += [
+        # An info-stealer hiding in a shared folder: browser logins, keychain, wallets, SSH/cloud keys, then persistence.
+        prof(syncd, "syncd-55554944", None, False, me, 3, 0.0,
+             [H + "/Library/Application Support/Google/Chrome/Default/Login Data",
+              H + "/Library/Application Support/Google/Chrome/Default/Cookies", H + "/Library/Cookies/Cookies.binarycookies",
+              H + "/Library/Keychains/login.keychain-db",
+              H + "/Library/Application Support/Google/Chrome/Default/Local Extension Settings/nkbihfbeogaeaoehlefnkodbefgpgknn/000003.log",
+              H + "/Library/Application Support/Exodus/exodus.wallet/seed.seco",
+              H + "/.ssh/id_ed25519", H + "/.aws/credentials", H + "/Library/LaunchAgents/com.sync.agent.plist"]),
+        # A signed "AI notes" app polling your messages, mail, contacts and notes.
+        prof(scribe, "com.acme.scribe", "A1C2M3E4S5", False, me, 2, 0.0,
+             [H + "/Library/Application Support/com.apple.TCC/TCC.db", H + "/Library/Messages/chat.db",
+              H + "/Library/Mail/V10/MailData/Envelope Index", H + "/Library/Application Support/AddressBook/AddressBook-v22.abcddb",
+              H + "/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite"]),
+        # A "free PDF converter" helper reading your documents, photos and other apps' data.
+        prof(pdf, "com.acme.pdfconverter.helper", "P7D8F9C0V1", False, me, 2, 0.0,
+             [H + "/Documents/Taxes/2025 Tax Return.pdf", H + "/Desktop/passport-scan.jpg",
+              H + "/Pictures/Photos Library.photoslibrary/database/Photos.sqlite",
+              H + "/Library/Application Support/Slack/storage/root-state.json", H + "/Library/Application Support/Notion/notion.db"]),
+        # A script running out of Downloads, hunting for API keys in your projects.
+        prof(dl_node, None, None, False, me, 2, 0.0,
+             [H + "/code/{proj}/.env", H + "/code/{proj}/.env.local", H + "/.npmrc", H + "/.config/gh/hosts.yml"]),
+        # An "updater" in a hidden folder that edits your shell startup file.
+        prof(updater, None, None, False, me, 1, 1.0, [H + "/.zshrc"]),
+    ]
+    hub.insights.signers.update({syncd: "Not signed", scribe: "Acme Labs, Inc. (A1C2M3E4S5)",
+                                 pdf: "Acme Software LLC (P7D8F9C0V1)", dl_node: "Not signed", updater: "Not signed"})
+    weights = [p["weight"] for p in profiles]
 
     burst, burst_until, acc, tick = None, 0.0, 0.0, 0.05
     while True:
@@ -1274,6 +1310,7 @@ const WHY = {
   'place:messages': 'Reading these needs Full Disk Access. If you didn’t expect this app to touch your messages or mail, remove its Full Disk Access.',
   'place:tcc': 'Apps sometimes read this to check whether they have Full Disk Access. An app you don’t recognize doing it is worth a look.',
   'place:browser': 'Saved logins and cookies let someone sign in as you. Only your browser should normally open these.',
+  'place:wallets': 'Crypto wallets are a top target for Mac malware. Only your wallet app and browser should open these.',
   'place:secrets': 'These files can unlock your servers, code and cloud accounts.',
   'place:photos': 'Only photo and backup apps should need your photo library.',
   'place:keychain': 'Apps often open the keychain file just to sign you in. Usually fine.',
