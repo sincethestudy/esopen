@@ -104,7 +104,7 @@ You can read the findings yourself and explain them:
 curl -s http://127.0.0.1:<port>/insights
 ```
 
-Each item in `findings` has `sev`, `kind`, `name`, `exe`, `signer` (who signed the app), `count` and `examples` (file paths). Start with high and medium findings. Say which app it is and who made it, what it touched, and what the user can do. For example: remove the app from Full Disk Access, uninstall it, or check `~/Library/LaunchAgents` for leftovers. Mention that macOS also reports attempts it blocked, so a finding means the app *tried* to open the file, not necessarily that it succeeded. Recommend leaving esopen running for a while, since some apps only act every few minutes or hours.
+Each item in `findings` has `sev`, `kind`, `name`, `exe`, `signer` (who signed the app), `labels` (what it opened, in words, most alarming first, like "iMessages" or "AWS keys"), `every` (seconds between repeat visits, if it keeps coming back on a schedule) and `examples` (file paths). Start with high and medium findings, and lead with the plain version, for example "Acme Notes is reading your iMessages every 15 seconds". Say who made the app, what else it touched, and what the user can do. For example: remove the app from Full Disk Access, uninstall it, or check `~/Library/LaunchAgents` for leftovers. Mention that macOS also reports attempts it blocked, so a finding means the app *tried* to open the file, not necessarily that it succeeded. Recommend leaving esopen running for a while, since some apps only act every few minutes or hours.
 
 ---
 

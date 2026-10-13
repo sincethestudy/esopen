@@ -63,6 +63,58 @@ PLACE_SEV = {p[0]: p[3] for p in PLACES}
 ESCALATE = {"low": "medium", "medium": "high"}  # for unsigned programs running from odd places
 PLACE_SHORT = {p[0]: p[2] for p in PLACES}
 
+# What exactly a sensitive path is, in words: (pattern, short tag for the live list, phrase for sentences, rank).
+# Lower rank = more alarming; Insights leads with the lowest-ranked thing an app touched.
+LABELS = [(re.compile(rx), tag, phrase, rank) for rank, (rx, tag, phrase) in enumerate([
+    (r"/Library/Messages/", "iMessages", "iMessages"),
+    (r"/Library/Mail/", "Email", "email"),
+    (r"/(?:Login Data|Login Data For Account|logins\.json|key4\.db)(?:-journal|-wal)?$", "Passwords", "saved browser passwords"),
+    (r"/Local Extension Settings/nkbihfbeogaeaoehlefnkodbefgpgknn/", "Wallet", "MetaMask wallet"),
+    (r"/Application Support/Exodus/", "Wallet", "Exodus wallet"),
+    (r"/Local Extension Settings/|/Application Support/(?:Exodus|atomic|Ledger Live|Bitcoin|Guarda|Coinomi)/|/\.electrum/",
+     "Wallet", "crypto wallet"),
+    (r"/\.ssh/", "SSH key", "SSH keys"),
+    (r"/\.aws/", "AWS keys", "AWS keys"),
+    (r"/\.config/gh/", "GitHub login", "GitHub login"),
+    (r"/\.env(?:\.[\w-]+)?$", "API keys", "API keys in .env files"),
+    (r"/\.(?:npmrc|pypirc|netrc|git-credentials)$|/\.(?:gnupg|kube|docker)/|/\.config/gcloud/", "Dev secrets", "developer credentials"),
+    (r"/Application Support/AddressBook/", "Contacts", "contacts"),
+    (r"group\.com\.apple\.notes", "Notes", "notes"),
+    (r"/Library/Calendars/", "Calendar", "calendar"),
+    (r"/(?:Cookies|cookies\.sqlite)(?:-journal|-wal)?$|/Library/Cookies/", "Cookies", "browser cookies"),
+    (r"/(?:History|places\.sqlite|Web Data)(?:-journal|-wal)?$|/Library/Safari/", "History", "browsing history"),
+    (r"\.photoslibrary/", "Photos", "photo library"),
+    (r"/com\.apple\.TCC/", "Privacy DB", "privacy settings"),
+    (r"/Library/(?:LaunchAgents|LaunchDaemons|StartupItems)/", "Login item", "login items"),
+    (r"/\.(?:zshrc|zprofile|zshenv|zlogin|bashrc|bash_profile|profile)$", "Shell startup", "shell startup file"),
+    (r"/Keychains/", "Keychain", "keychain"),
+    (r"/Library/Mobile Documents/", "iCloud", "iCloud Drive files"),
+    (r"^/Users/[^/]+/(?:Desktop|Documents|Downloads)/", "Documents", "documents"),
+])]
+
+
+def describe(path):
+    """(short tag, phrase, rank) for a sensitive path, or None."""
+    for rx, tag, phrase, rank in LABELS:
+        if rx.search(path):
+            return tag, phrase, rank
+    return None
+
+
+def every_seconds(times):
+    """If a file is opened on a steady rhythm, return the interval in seconds.
+
+    Needs 3+ opens; with only 3, the two gaps must be nearly identical."""
+    if len(times) < 3:
+        return None
+    gaps = sorted(b - a for a, b in zip(times, times[1:]))
+    mid = gaps[len(gaps) // 2]
+    slack = 1.15 if len(times) == 3 else 1.5
+    if mid >= 3000 and gaps[-1] <= mid * slack and gaps[0] >= mid / slack:
+        return mid / 1000
+    return None
+
+
 PERSIST = re.compile(r"/Library/(?:LaunchAgents|LaunchDaemons|StartupItems)/|^/Users/[^/]+/\.(?:zshrc|zprofile|zshenv|zlogin|"
                      r"bashrc|bash_profile|profile)$|^(?:/private)?/etc/(?:hosts|sudoers|paths|zshrc|profile)|/usr/lib/cron/tabs/")
 LIB_AREA = re.compile(r"^/Users/[^/]+/Library/(Application Support|Containers|Group Containers|Caches|Preferences|HTTPStorages|WebKit)/([^/]+)")
@@ -149,13 +201,26 @@ class Insights:
         k = (kind, key, e["exe"])
         h = self.hits.get(k)
         if h is None:
-            h = self.hits[k] = {"sev": sev, "count": 0, "writes": 0, "first": e["ts"], "last": 0, "examples": []}
+            h = self.hits[k] = {"sev": sev, "count": 0, "writes": 0, "first": e["ts"], "last": 0, "examples": [],
+                                "labels": {}, "times": {}}
         h["count"] += 1
         h["last"] = e["ts"]
         if e["ff"] & 2:
             h["writes"] += 1
-        if len(h["examples"]) < 3 and e["path"] not in h["examples"]:
-            h["examples"].append(e["path"])
+        path = e["path"]
+        if len(h["examples"]) < 3 and path not in h["examples"]:
+            h["examples"].append(path)
+        if kind != "location":
+            d = describe(path)
+            if d:
+                lab = h["labels"].setdefault(d[1], [d[2], 0, path])
+                lab[1] += 1
+            times = h["times"].get(path)
+            if times is None and len(h["times"]) < 50:
+                times = h["times"][path] = []
+            if times is not None:
+                times.append(e["ts"])
+                del times[:-6]
 
     def add(self, e):
         """Update the summaries, and tag the event (e["tag"], e["sev"]) so the live list can highlight it."""
@@ -201,6 +266,9 @@ class Insights:
                 self.flagged += 1
         if tag:
             e["tag"] = tag
+            d = describe(path)
+            if d:
+                e["what"], e["phrase"] = d[0], d[1]
         if sev:
             e["sev"] = sev
 
@@ -213,11 +281,15 @@ class Insights:
             findings = []
             for (kind, key, exe), h in self.hits.items():
                 info = self.exes[exe]
+                rhythms = [every_seconds(t) for t in h["times"].values()]
+                rhythms = [r for r in rhythms if r]
                 findings.append({
                     "kind": kind, "key": key, "sev": h["sev"], "name": info["name"], "exe": exe, "team": info["team"],
                     "signed": info["signed"], "signer": self.signers.get(exe), "count": h["count"], "writes": h["writes"],
                     "first": h["first"], "last": h["last"], "examples": list(h["examples"]),
-                    "what": PLACE_SHORT.get(key, key),
+                    "what": PLACE_SHORT.get(key, key), "every": min(rhythms) if rhythms else None,
+                    # [phrase, rank, count, example path], most alarming first
+                    "labels": sorted(([p, r, c, ex] for p, (r, c, ex) in h["labels"].items()), key=lambda x: x[1]),
                 })
             places = []
             for key, label, _, sev, _ in PLACES:
@@ -486,41 +558,43 @@ def run_demo(hub):
     bursty = [p for p in profiles if p["exe"].endswith(("/git", "/node", "mds_stores", "Helper"))]
 
     # Made-up bad actors (all names fictional) so the Insights tab has something to show in demo mode.
-    syncd, scribe = "/Users/Shared/.sync/syncd", "/Applications/Acme Scribe AI.app/Contents/MacOS/Acme Scribe AI"
-    pdf = "/Applications/Acme PDF Converter.app/Contents/Library/LoginItems/PDFHelper.app/Contents/MacOS/PDFHelper"
-    dl_node, updater = H + "/Downloads/setup-tools/bin/node", H + "/Library/Application Support/.updater/UpdateHelper"
+    # The star: a normal-looking, signed notes app that quietly checks your iMessages, email and contacts on a timer.
+    notes, notes_pid, notes_every = "/Applications/Acme Notes.app/Contents/MacOS/Acme Notes", rnd.randint(2000, 9000), 15.0
+    notes_paths = [H + "/Library/Application Support/com.apple.TCC/TCC.db", H + "/Library/Messages/chat.db",
+                   H + "/Library/Mail/V10/MailData/Envelope Index", H + "/Library/Application Support/AddressBook/AddressBook-v22.abcddb"]
+
+    def notes_tick(at):
+        for i, path in enumerate(notes_paths):
+            hub.push({"ts": at * 1000 + i * 3, "pid": notes_pid, "ppid": 1, "uid": me, "user": username(me), "exe": notes,
+                      "sid": "com.acme.notes", "team": "A1C2M3E4N5", "plat": False, "path": path, "ff": 0x1})
+
+    syncd, dl_node = "/Users/Shared/.sync/syncd", H + "/Downloads/setup-tools/bin/node"
     profiles += [
-        # An info-stealer hiding in a shared folder: browser logins, keychain, wallets, SSH/cloud keys, then persistence.
-        prof(syncd, "syncd-55554944", None, False, me, 3, 0.0,
+        # An info-stealer hiding in a shared folder: browser logins, wallets, SSH/cloud keys, then a login item.
+        prof(syncd, "syncd-55554944", None, False, me, 1, 0.0,
              [H + "/Library/Application Support/Google/Chrome/Default/Login Data",
-              H + "/Library/Application Support/Google/Chrome/Default/Cookies", H + "/Library/Cookies/Cookies.binarycookies",
-              H + "/Library/Keychains/login.keychain-db",
+              H + "/Library/Application Support/Google/Chrome/Default/Cookies",
               H + "/Library/Application Support/Google/Chrome/Default/Local Extension Settings/nkbihfbeogaeaoehlefnkodbefgpgknn/000003.log",
               H + "/Library/Application Support/Exodus/exodus.wallet/seed.seco",
               H + "/.ssh/id_ed25519", H + "/.aws/credentials", H + "/Library/LaunchAgents/com.sync.agent.plist"]),
-        # A signed "AI notes" app polling your messages, mail, contacts and notes.
-        prof(scribe, "com.acme.scribe", "A1C2M3E4S5", False, me, 2, 0.0,
-             [H + "/Library/Application Support/com.apple.TCC/TCC.db", H + "/Library/Messages/chat.db",
-              H + "/Library/Mail/V10/MailData/Envelope Index", H + "/Library/Application Support/AddressBook/AddressBook-v22.abcddb",
-              H + "/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite"]),
-        # A "free PDF converter" helper reading your documents, photos and other apps' data.
-        prof(pdf, "com.acme.pdfconverter.helper", "P7D8F9C0V1", False, me, 2, 0.0,
-             [H + "/Documents/Taxes/2025 Tax Return.pdf", H + "/Desktop/passport-scan.jpg",
-              H + "/Pictures/Photos Library.photoslibrary/database/Photos.sqlite",
-              H + "/Library/Application Support/Slack/storage/root-state.json", H + "/Library/Application Support/Notion/notion.db"]),
         # A script running out of Downloads, hunting for API keys in your projects.
-        prof(dl_node, None, None, False, me, 2, 0.0,
+        prof(dl_node, None, None, False, me, 1, 0.0,
              [H + "/code/{proj}/.env", H + "/code/{proj}/.env.local", H + "/.npmrc", H + "/.config/gh/hosts.yml"]),
-        # An "updater" in a hidden folder that edits your shell startup file.
-        prof(updater, None, None, False, me, 1, 1.0, [H + "/.zshrc"]),
     ]
-    hub.insights.signers.update({syncd: "Not signed", scribe: "Acme Labs, Inc. (A1C2M3E4S5)",
-                                 pdf: "Acme Software LLC (P7D8F9C0V1)", dl_node: "Not signed", updater: "Not signed"})
+    hub.insights.signers.update({notes: "Acme Labs, Inc. (A1C2M3E4N5)", syncd: "Not signed", dl_node: "Not signed"})
     weights = [p["weight"] for p in profiles]
+
+    # Pretend Acme Notes has been doing this for the last few minutes, on the same rhythm it keeps going at.
+    next_notes = time.time() + 19
+    for k in range(12, 0, -1):
+        notes_tick(next_notes - k * notes_every)
 
     burst, burst_until, acc, tick = None, 0.0, 0.0, 0.05
     while True:
         now = time.time()
+        if now >= next_notes:
+            notes_tick(next_notes)
+            next_notes += notes_every
         if burst and now > burst_until:
             burst = None
         if not burst and rnd.random() < 0.012:
@@ -914,20 +988,19 @@ body.ins .stats{display:none}
 .approw{padding:14px 18px;border-top:1px solid var(--line);cursor:pointer;transition:background .15s}
 .approw:first-child{border-top:0}
 .approw:hover,.approw.open{background:#fafbfc}
-.ar-top{display:flex;align-items:center;gap:10px;min-width:0}
-.ar-top .av{width:30px;height:30px;border-radius:9px;font-size:13px}
-.ar-name{font-weight:650;font-size:14.5px;white-space:nowrap}
-.ar-who{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ar-top{display:flex;align-items:flex-start;gap:12px;min-width:0}
+.ar-top .av{width:34px;height:34px;border-radius:10px;font-size:14px;margin-top:1px}
+.ar-text{flex:1;min-width:0}
+.ar-head{font-size:16px;line-height:1.35;letter-spacing:-.01em;color:var(--text)}
+.ar-head b{font-weight:700}
+.ar-head em{font-style:normal;font-weight:700;color:#b91c1c}
+.approw.medium .ar-head em{color:#b45309}
+.ar-sub{font-size:13px;color:#334155;margin-top:4px}
+.ar-who{font-size:12.5px;color:var(--muted);margin-top:3px;word-break:break-all}
 .ar-who .bad{color:#b91c1c;font-weight:550}
-.ar-chev{margin-left:auto;flex:none;color:var(--faint);transition:transform .2s}
+.ar-chev{flex:none;color:var(--faint);transition:transform .2s;margin-top:5px}
 .approw.open .ar-chev{transform:rotate(90deg)}
-.ar-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0 40px}
-.pchip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:#f1f5f9;color:#475569}
-.pchip i{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block}
-.pchip.high{background:#fef2f2;color:#b91c1c}
-.pchip.medium{background:#fff7ed;color:#b45309}
-.ar-detail{margin:12px 0 2px 40px;font-size:13px;color:#334155;cursor:auto}
-.ar-detail p{margin:0 0 10px}
+.ar-detail{margin:12px 0 2px 46px;font-size:13px;color:#334155;cursor:auto}
 .ar-files{display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
 .ar-files div{display:flex;flex-direction:column;font:11.5px/1.5 var(--mono);color:#64748b;word-break:break-all}
 .ar-files b{font:600 11.5px var(--sans);color:#475569}
@@ -1152,7 +1225,7 @@ function makeRow(e, fresh) {
   el.innerHTML = `<div class="c-time">${clock(e.ts)}</div>`
     + `<div class="c-proc">${avatar(e.name)}<span class="pn">${esc(e.name)}</span><span class="pid">${e.pid == null ? '' : e.pid}</span></div>`
     + `<div><span class="badge ${mc}">${ml}</span></div>`
-    + `<div class="c-path" title="${esc(e.path)}"><span class="dir">${esc(dir)}</span><span class="file">${esc(file)}</span>${e.sev ? `<span class="tag ${e.sev}">${esc(TAG_LABEL[e.tag] || e.tag)}</span>` : ''}</div>`;
+    + `<div class="c-path" title="${esc(e.path)}"><span class="dir">${esc(dir)}</span><span class="file">${esc(file)}</span>${e.sev ? `<span class="tag ${e.sev}">${esc(e.what || TAG_LABEL[e.tag] || e.tag)}</span>` : ''}</div>`;
   return el;
 }
 function render(slideBy = 0) {
@@ -1328,8 +1401,6 @@ function exportCsv() {
 let ins = null;
 const expanded = new Set();
 const RANK = { high: 0, medium: 1, low: 2 };
-const PLACE_CHIP = { messages: 'Messages & Mail', tcc: 'Privacy settings', browser: 'Passwords & cookies', wallets: 'Crypto wallets',
-  secrets: 'SSH & API keys', photos: 'Photos', keychain: 'Keychain', documents: 'Documents', icloud: 'iCloud Drive' };
 const PLACE_WHAT = { messages: 'messages & mail', tcc: 'privacy settings', browser: 'browser passwords', wallets: 'crypto wallets',
   secrets: 'SSH & API keys', photos: 'photos', keychain: 'keychain', documents: 'documents', icloud: 'iCloud files' };
 const WHY = {
@@ -1353,7 +1424,7 @@ const areaName = key => key.split('/').pop();
 function flagBox(e) {
   const what = e.tag === 'persist' ? `${e.name} changed a file that makes programs start automatically.`
     : e.tag === 'crossapp' ? `${e.name} opened another app's private data.`
-    : `${e.name} isn't an Apple program, and it opened your ${PLACE_WHAT[e.tag] || 'private data'}.`;
+    : `${e.name} isn't an Apple program, and it opened your ${e.phrase || PLACE_WHAT[e.tag] || 'private data'}.`;
   const why = WHY[e.tag === 'persist' || e.tag === 'crossapp' ? e.tag : 'place:' + e.tag] || '';
   return `<div class="flagbox ${e.sev}"><b>Why this is flagged</b>${esc(what)} ${esc(why)}</div>`;
 }
@@ -1364,54 +1435,68 @@ function groupApps(findings) {
   for (const f of findings) {
     let g = by.get(f.exe);
     if (!g) by.set(f.exe, g = { exe: f.exe, name: f.name, signer: f.signer, team: f.team, signed: f.signed, sev: 'low',
-      count: 0, last: 0, places: [], persist: null, cross: [], loc: null });
+      count: 0, last: 0, cross: [], loc: null, labels: new Map(), every: null });
     if (RANK[f.sev] < RANK[g.sev]) g.sev = f.sev;
     if (f.kind !== 'location') g.count += f.count;
     g.last = Math.max(g.last, f.last);
-    if (f.kind === 'place') g.places.push(f);
-    else if (f.kind === 'persist') g.persist = f;
-    else if (f.kind === 'crossapp') g.cross.push(f);
-    else if (f.kind === 'location') g.loc = f;
+    if (f.kind === 'crossapp') g.cross.push(f);
+    if (f.kind === 'location') g.loc = f;
+    if (f.every && (!g.every || f.every < g.every)) g.every = f.every;
+    for (const [phrase, rank, count, ex] of f.labels || []) {
+      const x = g.labels.get(phrase);
+      if (x) x.count += count; else g.labels.set(phrase, { phrase, rank, count, ex });
+    }
   }
   const apps = [...by.values()];
-  const highs = g => g.places.filter(p => p.sev === 'high').length + (g.persist && g.persist.sev === 'high' ? 1 : 0);
-  for (const g of apps) g.places.sort((a, b) => RANK[a.sev] - RANK[b.sev] || b.count - a.count);
-  return apps.sort((a, b) => RANK[a.sev] - RANK[b.sev] || highs(b) - highs(a) || b.count - a.count);
+  for (const g of apps) g.list = [...g.labels.values()].sort((a, b) => a.rank - b.rank);
+  const worst = g => g.list.length ? g.list[0].rank : 99;
+  return apps.sort((a, b) => RANK[a.sev] - RANK[b.sev] || worst(a) - worst(b) || b.count - a.count);
 }
-function appSummary(g) {
-  const parts = [];
-  if (g.places.length) parts.push('opened your ' + listJoin(g.places.map(p => PLACE_WHAT[p.key])));
-  if (g.cross.length) parts.push(`read other apps' data (${listJoin(g.cross.map(c => areaName(c.key)))})`);
-  if (g.persist) parts.push('changed a startup file' + (g.persist.examples[0] ? ` (${baseName(g.persist.examples[0])})` : ''));
-  if (!parts.length && g.loc) parts.push(`runs from an unusual place${g.signed ? '' : ' with no developer signature'}`);
-  const s = parts.length > 1 ? parts.slice(0, -1).join(', ') + ', and ' + parts[parts.length - 1] : parts[0] || '';
-  return s.charAt(0).toUpperCase() + s.slice(1) + '.';
+const STARTUP = new Set(['login items', 'shell startup file']);
+const fmtEvery = s => s < 90 ? `${Math.round(s)} seconds` : s < 5400 ? `${Math.round(s / 60)} minutes` : `${Math.round(s / 3600)} hours`;
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+// "Acme Notes is reading your iMessages": the single most alarming thing, in words.
+function appHeadline(g) {
+  const name = `<b>${esc(g.name)}</b>`, first = g.list.find(l => !STARTUP.has(l.phrase));
+  if (first) return `${name} ${g.every ? 'is reading' : 'opened'} your <em>${esc(first.phrase)}</em>`;
+  if (g.list.some(l => l.phrase === 'login items')) return `${name} <em>set itself up to start at login</em>`;
+  if (g.list.length) return `${name} <em>edited your shell startup file</em>`;
+  if (g.cross.length) return `${name} opened <em>other apps' private data</em>`;
+  return `${name} runs from <em>an unusual folder</em>${g.signed ? '' : ' with no developer signature'}`;
+}
+// "Every 15 seconds · also your email, contacts and privacy settings"
+function appSubline(g) {
+  const things = g.list.filter(l => !STARTUP.has(l.phrase)).map(l => l.phrase), rest = things.slice(1), parts = [];
+  if (g.every) parts.push(`every ${fmtEvery(g.every)}`);
+  if (rest.length) parts.push('also your ' + listJoin(rest.length > 4 ? [...rest.slice(0, 3), `${rest.length - 3} more`] : rest));
+  if (things.length && g.list.some(l => l.phrase === 'login items')) parts.push('set itself up to start at login');
+  if (g.cross.length && g.list.length) parts.push(`read ${listJoin(g.cross.map(c => areaName(c.key)))}'s data`);
+  return cap(parts.join(' · '));
 }
 function whoLine(g) {
   const signed = g.signer && !/^(No developer|Not signed)/.test(g.signer);
   const who = signed ? `Made by ${esc(g.signer.replace(/\s*\([A-Z0-9]{10}\)$/, ''))}`
-    : g.team ? `Team ID ${esc(g.team)}` : '<span class="bad">Not signed</span>';
+    : g.team ? `Team ID ${esc(g.team)}` : '<span class="bad">Not signed by any developer</span>';
   const dir = tilde(g.exe.slice(0, g.exe.lastIndexOf('/') + 1));
   const where = g.loc ? ` · runs from <span class="${g.loc.sev === 'high' ? 'bad' : ''}">${esc(dir)}</span>` : '';
   return who + where;
 }
 function appRow(g) {
-  const chips = [...g.places.map(p => [p.sev, PLACE_CHIP[p.key]]), ...(g.persist ? [[g.persist.sev, 'Startup file']] : []),
-    ...(g.cross.length ? [['medium', "Other apps' data"]] : [])]
-    .map(([sev, label]) => `<span class="pchip ${sev}"><i></i>${esc(label)}</span>`).join('');
-  const open = expanded.has(g.exe);
+  const open = expanded.has(g.exe), sub = appSubline(g);
   let detail = '';
   if (open) {
-    const files = [...g.places.map(p => [PLACE_CHIP[p.key], p.examples]), ...(g.persist ? [['Startup file', g.persist.examples]] : []),
-      ...g.cross.map(c => [areaName(c.key) + ' data', c.examples])];
-    detail = `<div class="ar-detail"><p>${esc(appSummary(g))}</p>`
-      + (files.length ? `<div class="ar-files">${files.map(([l, ex]) => `<div><b>${esc(l)}</b>${ex.slice(0, 2).map(p => `<span>${esc(tilde(p))}</span>`).join('')}</div>`).join('')}</div>` : '')
+    const files = [...g.list.map(l => [l.phrase, l.ex]), ...g.cross.map(c => [areaName(c.key) + ' data', c.examples[0]])];
+    detail = `<div class="ar-detail">`
+      + (files.length ? `<div class="ar-files">${files.map(([l, ex]) => `<div><b>${esc(cap(l))}</b><span>${esc(tilde(ex || ''))}</span></div>`).join('')}</div>` : '')
       + `<button class="linkbtn" data-show="${esc(g.name)}">Show in live view →</button></div>`;
   }
   return `<div class="approw ${g.sev}${open ? ' open' : ''}" data-exe="${esc(g.exe)}">
-    <div class="ar-top">${avatar(g.name)}<span class="ar-name">${esc(g.name)}</span><span class="ar-who">${whoLine(g)}</span>
+    <div class="ar-top">${avatar(g.name)}<div class="ar-text">
+        <div class="ar-head">${appHeadline(g)}</div>
+        ${sub ? `<div class="ar-sub">${esc(sub)}</div>` : ''}
+        <div class="ar-who">${whoLine(g)}</div></div>
       <svg class="ar-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></div>
-    ${chips ? `<div class="ar-chips">${chips}</div>` : ''}${detail}</div>`;
+    ${detail}</div>`;
 }
 function renderInsights() {
   if (!ins) return;

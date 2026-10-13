@@ -22,7 +22,7 @@ The agent does the setup. You type your Mac password and turn on one switch in S
 
 1. **Watches.** esopen uses Apple's Endpoint Security (the same system that security software is built on) to see every file any app opens. That's often thousands per second.
 2. **Checks.** Each one is compared against your private places: Messages and Mail, browser passwords and cookies, crypto wallets, SSH and API keys, Photos, the keychain and startup files. Apple's own processes, and apps opening their own data (like Chrome opening Chrome's cookies), are ignored.
-3. **Flags.** Whatever is left is tagged in the live list the moment it happens. The Insights tab then sums it up per app: what it opened, who made it, and where it runs from.
+3. **Flags.** Whatever is left is tagged in the live list the moment it happens. The Insights tab then sums it up per app: what it opened, how often, who made it, and where it runs from.
 
 ## What you'll see
 
@@ -32,11 +32,16 @@ The agent does the setup. You type your Mac password and turn on one switch in S
 - Click any row for the details and a plain-English reason it was flagged.
 - Search (`-word` excludes, `proc:"Name"` and `path:~/Documents` target a field), use **Hide Apple** to cut system noise, press `Space` to pause, and **Export** to CSV.
 
-**Insights** is a summary of everything since esopen started.
+**Insights** turns everything since esopen started into one plain sentence per app, most alarming first:
 
-- One card per suspicious app: what it opened, who signed it ("Made by Acme Labs, Inc." or "Not signed by any developer"), and whether it runs from an odd place like a hidden folder or Downloads.
-- Ranked High, Medium or Low. High means an app that isn't Apple's touched your messages, mail, passwords, wallets or privacy settings, or set itself up to start at login.
-- **Your private places** shows which apps got into each one.
+> **Acme Notes** is reading your **iMessages**
+> Every 15 seconds · also your email, contacts and privacy settings
+> Made by Acme Labs, Inc.
+
+- It names the exact thing an app opened: your iMessages, email, contacts, saved browser passwords, MetaMask wallet, SSH or AWS keys, `.env` files, and so on.
+- If an app keeps coming back on a schedule, esopen tells you how often.
+- You see who signed each app, or "Not signed by any developer", and whether it runs from an odd place like a hidden folder or Downloads.
+- Click an app to see the exact files.
 
 ## Reading the results
 
