@@ -900,66 +900,44 @@ aside{overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px;b
 .flagbox.low{background:#f8fafc;color:#475569}
 
 /* insights */
-#insights{flex:1;overflow-y:auto;background:#fbfbfc}
-.ins-wrap{max-width:980px;margin:0 auto;padding:26px 24px 60px}
-.ins-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:16px}
-.ins-head h2{margin:0;font-size:20px;font-weight:700;letter-spacing:-.02em}
-.ins-sub{color:var(--muted);font-size:12.5px;margin-top:3px}
-.how{display:flex;gap:10px;margin-bottom:14px}
-.how > div{flex:1;display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 13px;font-size:12.5px;color:#475569;line-height:1.45}
-.how b{display:block;color:var(--text);margin-bottom:1px}
-.how .n{flex:none;width:22px;height:22px;border-radius:7px;background:#f1f5f9;color:#475569;font-weight:700;font-size:11.5px;display:grid;place-items:center}
-.verdict{display:flex;align-items:center;gap:14px;padding:16px 18px;border-radius:14px;border:1px solid var(--line);background:#fff}
-.verdict .vi{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:18px;font-weight:700;flex:none}
-.verdict.ok .vi{background:#ecfdf3;color:var(--green)}
-.verdict.warn .vi{background:#fff7ed;color:var(--amber)}
-.verdict.bad{border-color:#fecaca;background:#fffafa}
-.verdict.bad .vi{background:#fee2e2;color:var(--red)}
-.verdict b{font-size:15.5px;letter-spacing:-.01em}
-.verdict .vs{color:var(--muted);font-size:12.5px;margin-top:2px}
-.ins-wrap h3{font-size:11.5px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:24px 0 10px}
-.appcard{background:#fff;border:1px solid var(--line);border-left:4px solid var(--line2);border-radius:14px;padding:15px 18px 13px;margin-bottom:10px}
-.appcard.high{border-left-color:var(--red)}
-.appcard.medium{border-left-color:var(--amber)}
-.ac-top{display:flex;align-items:center;gap:12px}
-.ac-top .av{width:34px;height:34px;border-radius:10px;font-size:15px}
-.ac-name{font-size:15px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
-.ac-who{font-size:12.5px;color:var(--muted);margin-top:1px;word-break:break-all}
-.ac-who .bad{color:#b91c1c;font-weight:550}
-.ac-meta{margin-left:auto;font-size:12px;color:var(--faint);white-space:nowrap;align-self:flex-start}
-.ac-sum{font-size:13.5px;margin:10px 0 9px;line-height:1.45}
-.chips2{display:flex;flex-wrap:wrap;gap:6px}
-.pchip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;background:#f1f5f9;color:#475569}
+#insights{flex:1;overflow-y:auto;background:#fff}
+body.ins .stats{display:none}
+.ins-wrap{max-width:820px;margin:0 auto;padding:40px 24px 60px}
+.ins-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:22px}
+.ins-title{display:flex;align-items:center;gap:12px;font-size:23px;font-weight:700;letter-spacing:-.025em}
+.ins-title .vi{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-size:15px;flex:none}
+.ins-title.bad .vi{background:#fee2e2;color:var(--red)}
+.ins-title.warn .vi{background:#fff7ed;color:var(--amber)}
+.ins-title.ok .vi{background:#ecfdf3;color:var(--green)}
+.ins-sub{color:var(--muted);font-size:13px;margin:6px 0 0 42px}
+.applist{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.approw{padding:14px 18px;border-top:1px solid var(--line);cursor:pointer;transition:background .15s}
+.approw:first-child{border-top:0}
+.approw:hover,.approw.open{background:#fafbfc}
+.ar-top{display:flex;align-items:center;gap:10px;min-width:0}
+.ar-top .av{width:30px;height:30px;border-radius:9px;font-size:13px}
+.ar-name{font-weight:650;font-size:14.5px;white-space:nowrap}
+.ar-who{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ar-who .bad{color:#b91c1c;font-weight:550}
+.ar-chev{margin-left:auto;flex:none;color:var(--faint);transition:transform .2s}
+.approw.open .ar-chev{transform:rotate(90deg)}
+.ar-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0 40px}
+.pchip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:#f1f5f9;color:#475569}
 .pchip i{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block}
-.pchip span{font-weight:500;opacity:.7}
 .pchip.high{background:#fef2f2;color:#b91c1c}
 .pchip.medium{background:#fff7ed;color:#b45309}
-.ac-foot{display:flex;gap:16px;align-items:center;margin-top:11px}
+.ar-detail{margin:12px 0 2px 40px;font-size:13px;color:#334155;cursor:auto}
+.ar-detail p{margin:0 0 10px}
+.ar-files{display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
+.ar-files div{display:flex;flex-direction:column;font:11.5px/1.5 var(--mono);color:#64748b;word-break:break-all}
+.ar-files b{font:600 11.5px var(--sans);color:#475569}
 .linkbtn{border:0;background:none;color:var(--accent);font-size:12.5px;font-weight:550;cursor:pointer;padding:0}
-.ac-files{margin-top:9px;font:11.5px/1.7 var(--mono);color:#64748b;background:#f8fafc;border-radius:9px;padding:8px 11px;word-break:break-all}
-.ac-files b{font:600 11.5px var(--sans);color:#475569}
-.sev{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:2px 7px;border-radius:6px}
-.sev.high{background:#fef2f2;color:#b91c1c}.sev.medium{background:#fff7ed;color:#b45309}.sev.low{background:#f1f5f9;color:#64748b}
-.morebtn{border:0;background:none;color:var(--accent);font-size:12.5px;font-weight:550;cursor:pointer;padding:8px 0}
-.places{display:grid;grid-template-columns:repeat(auto-fill,minmax(225px,1fr));gap:8px}
-.place{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 13px}
-.pl-top{display:flex;align-items:center;gap:8px}
-.pl-top b{font-size:12.5px}
-.pl-st{margin-left:auto;font-size:11px;font-weight:650;padding:2px 8px;border-radius:999px;white-space:nowrap}
-.place.ok .pl-st{background:#ecfdf3;color:#15803d}
-.place.warn .pl-st{background:#fff7ed;color:#b45309}
-.place.bad{border-color:#fecaca}
-.place.bad .pl-st{background:#fef2f2;color:#b91c1c}
-.place.idle .pl-st{background:#f4f6f8;color:var(--faint)}
-.place.note .pl-st{background:#f1f5f9;color:#475569}
-.pl-apps{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px 10px}
-.pl-app{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#334155}
-.pl-app .av{width:16px;height:16px;font-size:9px;border-radius:5px}
-.pl-app.own{color:var(--faint)}
-.ins-note{color:var(--faint);font-size:12px;line-height:1.6;margin-top:28px}
+.ins-low{color:var(--muted);font-size:12.5px;margin-top:14px}
+.ins-low:empty{display:none}
+.ins-note{color:var(--faint);font-size:12px;margin-top:8px}
 
 @media (max-width:1100px){main{grid-template-columns:1fr}aside{display:none}.stat.procs{display:none}}
-@media (max-width:820px){.thead,.row{grid-template-columns:84px 170px 40px minmax(0,1fr)}.chips{display:none}.how{flex-direction:column}}
+@media (max-width:820px){.thead,.row{grid-template-columns:84px 170px 40px minmax(0,1fr)}.chips{display:none}}
 </style>
 </head>
 <body>
@@ -1018,22 +996,13 @@ aside{overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px;b
 <section id="insights" hidden>
   <div class="ins-wrap">
     <div class="ins-head">
-      <div><h2>Insights</h2><div class="ins-sub" id="insSub">Collecting…</div></div>
+      <div><div class="ins-title" id="insTitle">Collecting…</div><div class="ins-sub" id="insSub"></div></div>
       <div class="grow"></div>
       <button class="btn" id="insReset" title="Forget everything collected so far and start over">Start over</button>
     </div>
-    <div class="how">
-      <div><span class="n">1</span><span><b>Watches</b>every file your Mac opens, from every app, using Apple's Endpoint Security.</span></div>
-      <div><span class="n">2</span><span><b>Checks</b>each one against your private places: messages, passwords, wallets, keys and startup files.</span></div>
-      <div><span class="n">3</span><span><b>Flags</b>apps that aren't Apple's and aren't just opening their own data.</span></div>
-    </div>
-    <div class="verdict" id="verdict"></div>
     <div id="insApps"></div>
-    <h3>Your private places</h3>
-    <div class="places" id="insPlaces"></div>
-    <div class="ins-note">Covers everything since esopen started (or since you clicked “Start over”), not just what's in the live list.
-      macOS reports attempts it blocked too, so an entry means an app <i>tried</i> to open the file, not necessarily that it succeeded.
-      File activity can't show screen recording, keystroke monitoring or network traffic. Check those in System Settings → Privacy &amp; Security.</div>
+    <div class="ins-low" id="insLow"></div>
+    <div class="ins-note">Includes attempts macOS blocked. Can't see screen recording, keystrokes or network traffic.</div>
   </div>
 </section>
 <script>
@@ -1356,7 +1325,7 @@ function exportCsv() {
 }
 
 // ---------------------------------------------------------------- insights
-let ins = null, showLow = false;
+let ins = null;
 const expanded = new Set();
 const RANK = { high: 0, medium: 1, low: 2 };
 const PLACE_CHIP = { messages: 'Messages & Mail', tcc: 'Privacy settings', browser: 'Passwords & cookies', wallets: 'Crypto wallets',
@@ -1421,64 +1390,48 @@ function appSummary(g) {
 function whoLine(g) {
   const signed = g.signer && !/^(No developer|Not signed)/.test(g.signer);
   const who = signed ? `Made by ${esc(g.signer.replace(/\s*\([A-Z0-9]{10}\)$/, ''))}`
-    : g.team ? `Team ID ${esc(g.team)}` : '<span class="bad">Not signed by any developer</span>';
+    : g.team ? `Team ID ${esc(g.team)}` : '<span class="bad">Not signed</span>';
   const dir = tilde(g.exe.slice(0, g.exe.lastIndexOf('/') + 1));
   const where = g.loc ? ` · runs from <span class="${g.loc.sev === 'high' ? 'bad' : ''}">${esc(dir)}</span>` : '';
   return who + where;
 }
-function appCard(g) {
-  const chips = [...g.places.map(p => [p.sev, PLACE_CHIP[p.key], p.count]),
-    ...(g.persist ? [[g.persist.sev, 'Startup file', g.persist.count]] : []),
-    ...g.cross.map(c => [c.sev, areaName(c.key) + ' data', c.count])]
-    .map(([sev, label, n]) => `<span class="pchip ${sev}"><i></i>${esc(label)} <span>${fmt(n)}×</span></span>`).join('');
-  const files = [...g.places.map(p => [PLACE_CHIP[p.key], p.examples]), ...(g.persist ? [['Startup file', g.persist.examples]] : []),
-    ...g.cross.map(c => [areaName(c.key) + ' data', c.examples])];
+function appRow(g) {
+  const chips = [...g.places.map(p => [p.sev, PLACE_CHIP[p.key]]), ...(g.persist ? [[g.persist.sev, 'Startup file']] : []),
+    ...(g.cross.length ? [['medium', "Other apps' data"]] : [])]
+    .map(([sev, label]) => `<span class="pchip ${sev}"><i></i>${esc(label)}</span>`).join('');
   const open = expanded.has(g.exe);
-  return `<div class="appcard ${g.sev}">
-    <div class="ac-top">${avatar(g.name)}<div style="min-width:0">
-        <div class="ac-name">${esc(g.name)} <span class="sev ${g.sev}">${g.sev}</span></div>
-        <div class="ac-who">${whoLine(g)}</div></div>
-      <div class="ac-meta">${g.count ? fmt(g.count) + ' opens · ' : ''}last ${ago(g.last)}</div></div>
-    <div class="ac-sum">${esc(appSummary(g))}</div>
-    ${chips ? `<div class="chips2">${chips}</div>` : ''}
-    <div class="ac-foot">${files.length ? `<button class="linkbtn" data-files="${esc(g.exe)}">${open ? 'Hide files' : 'Show files'}</button>` : ''}
-      <button class="linkbtn" data-show="${esc(g.name)}">Show in live view →</button></div>
-    ${open && files.length ? `<div class="ac-files">${files.map(([l, ex]) => `<b>${esc(l)}</b><br>${ex.map(p => esc(tilde(p))).join('<br>')}`).join('<br>')}</div>` : ''}
-  </div>`;
-}
-function placeTile(p) {
-  const others = p.apps.filter(a => !a.own);
-  let cls = 'ok', st = 'Only Apple';
-  if (!p.total) { cls = 'idle'; st = 'Not touched'; }
-  else if (others.length) { cls = { high: 'bad', medium: 'warn' }[p.sev] || 'note'; st = plural(others.length, 'app'); }
-  else if (p.apps.length) st = 'Only their own apps';
-  const apps = p.apps.slice(0, 5).map(a => `<span class="pl-app${a.own ? ' own' : ''}">${avatar(a.name)}${esc(a.name)}</span>`).join('');
-  return `<div class="place ${cls}"><div class="pl-top"><b>${esc(p.label)}</b><span class="pl-st">${st}</span></div>${apps ? `<div class="pl-apps">${apps}</div>` : ''}</div>`;
+  let detail = '';
+  if (open) {
+    const files = [...g.places.map(p => [PLACE_CHIP[p.key], p.examples]), ...(g.persist ? [['Startup file', g.persist.examples]] : []),
+      ...g.cross.map(c => [areaName(c.key) + ' data', c.examples])];
+    detail = `<div class="ar-detail"><p>${esc(appSummary(g))}</p>`
+      + (files.length ? `<div class="ar-files">${files.map(([l, ex]) => `<div><b>${esc(l)}</b>${ex.slice(0, 2).map(p => `<span>${esc(tilde(p))}</span>`).join('')}</div>`).join('')}</div>` : '')
+      + `<button class="linkbtn" data-show="${esc(g.name)}">Show in live view →</button></div>`;
+  }
+  return `<div class="approw ${g.sev}${open ? ' open' : ''}" data-exe="${esc(g.exe)}">
+    <div class="ar-top">${avatar(g.name)}<span class="ar-name">${esc(g.name)}</span><span class="ar-who">${whoLine(g)}</span>
+      <svg class="ar-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></div>
+    ${chips ? `<div class="ar-chips">${chips}</div>` : ''}${detail}</div>`;
 }
 function renderInsights() {
   if (!ins) return;
-  $('insSub').textContent = `Watching for ${duration(Date.now() - ins.since)} · ${fmt(ins.events)} file opens checked · ${fmt(ins.flagged)} flagged`;
   const apps = groupApps(ins.findings);
-  const hi = apps.filter(g => g.sev === 'high'), med = apps.filter(g => g.sev === 'medium'), low = apps.filter(g => g.sev === 'low');
-  const v = $('verdict');
-  if (hi.length) {
-    v.className = 'verdict bad';
-    v.innerHTML = `<div class="vi">!</div><div><b>${plural(hi.length, 'app')} ${hi.length === 1 ? 'is' : 'are'} touching your private data</b>`
-      + `<div class="vs">Here's what each one opened and who made it.${med.length ? ` ${plural(med.length, 'more app')} worth a glance below.` : ''}</div></div>`;
-  } else if (med.length) {
-    v.className = 'verdict warn';
-    v.innerHTML = `<div class="vi">?</div><div><b>Nothing alarming. ${plural(med.length, 'app')} worth a glance</b><div class="vs">Probably fine, but make sure you recognize ${med.length === 1 ? 'it' : 'them'}.</div></div>`;
+  const top = apps.filter(g => g.sev !== 'low'), low = apps.filter(g => g.sev === 'low');
+  const t = $('insTitle'), watching = `Watching for ${duration(Date.now() - ins.since)}.`;
+  if (top.some(g => g.sev === 'high')) {
+    t.className = 'ins-title bad';
+    t.innerHTML = `<span class="vi">!</span>${plural(top.length, 'app')} ${top.length === 1 ? 'is' : 'are'} touching your private data`;
+  } else if (top.length) {
+    t.className = 'ins-title warn';
+    t.innerHTML = `<span class="vi">?</span>${plural(top.length, 'app')} worth a glance`;
   } else {
-    v.className = 'verdict ok';
-    v.innerHTML = `<div class="vi">✓</div><div><b>Nothing worrying so far</b><div class="vs">Keep esopen running while you use your Mac normally. Some apps only act every few minutes or hours.</div></div>`;
+    t.className = 'ins-title ok';
+    t.innerHTML = '<span class="vi">✓</span>Nothing worrying so far';
   }
-  let html = (hi.length || med.length) ? '<h3>Apps to look at</h3>' + [...hi, ...med].map(appCard).join('') : '';
-  if (low.length) {
-    html += `<button class="morebtn" id="toggleLow">${showLow ? 'Hide' : 'Show'} ${plural(low.length, 'app')} with normal-looking activity</button>`;
-    if (showLow) html += low.map(appCard).join('');
-  }
-  $('insApps').innerHTML = html;
-  $('insPlaces').innerHTML = ins.places.map(placeTile).join('');
+  $('insSub').textContent = top.length ? `Click an app to see what it opened. ${watching}`
+    : `${watching} Keep it running while you use your Mac. Some apps only act every few minutes.`;
+  $('insApps').innerHTML = top.length ? `<div class="applist">${top.map(appRow).join('')}</div>` : '';
+  $('insLow').textContent = low.length ? `Also seen, and normal-looking: ${listJoin(low.map(g => g.name))}.` : '';
 }
 async function loadInsights() {
   try { const r = await fetch('/insights'); ins = await r.json(); } catch (_) { return; }
@@ -1491,11 +1444,11 @@ async function loadInsights() {
   if (tab === 'insights') renderInsights();
 }
 $('insApps').addEventListener('click', ev => {
-  if (ev.target.id === 'toggleLow') { showLow = !showLow; renderInsights(); return; }
-  const f = ev.target.closest('[data-files]');
-  if (f) { const k = f.dataset.files; expanded.has(k) ? expanded.delete(k) : expanded.add(k); renderInsights(); return; }
   const b = ev.target.closest('[data-show]');
-  if (b) { qInput.value = 'proc:' + quote(b.dataset.show); prefs.hideApple = false; prefs.flagged = false; setTab('live'); applyFilters(); }
+  if (b) { qInput.value = 'proc:' + quote(b.dataset.show); prefs.hideApple = false; prefs.flagged = false; setTab('live'); applyFilters(); return; }
+  if (ev.target.closest('.ar-detail')) return;  // leave the details selectable
+  const row = ev.target.closest('.approw');
+  if (row) { const k = row.dataset.exe; expanded.has(k) ? expanded.delete(k) : expanded.add(k); renderInsights(); }
 });
 $('insReset').addEventListener('click', async () => {
   await fetch('/insights/reset', { method: 'POST' }).catch(() => {});
