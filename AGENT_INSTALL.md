@@ -95,8 +95,8 @@ done
 
 ## Explaining the results
 
-- **Live tab**: every file open as it happens. Typing filters it, `-word` excludes, and **Hide Apple** removes macOS's own background activity.
-- **Insights tab**: findings ranked High, Medium and Low, plus a grid of sensitive places showing which apps touched each.
+- **Live tab**: every file open as it happens. Opens of private data by apps that aren't Apple's get a red or orange tag (Passwords, Wallet, Keys, Startup file…). **Flagged only** shows just those, and clicking a row explains why it was flagged.
+- **Insights tab**: one card per suspicious app, saying what it opened, who made it and where it runs from, ranked High, Medium and Low. Below that, a grid shows which apps got into each private place.
 
 You can read the findings yourself and explain them:
 

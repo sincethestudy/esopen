@@ -109,6 +109,7 @@ class Insights:
     def _clear(self):
         self.started = time.time()
         self.events = 0
+        self.flagged = 0
         self.exes = {}   # exe path -> identity info
         self.hits = {}   # (kind, key, exe) -> counts and example paths
         self.places = {p[0]: {"total": 0, "apple": 0, "apps": {}} for p in PLACES}
@@ -157,7 +158,9 @@ class Insights:
             h["examples"].append(e["path"])
 
     def add(self, e):
+        """Update the summaries, and tag the event (e["tag"], e["sev"]) so the live list can highlight it."""
         path = e["path"]
+        tag = sev = None
         with self.lock:
             self.events += 1
             info = self._exe(e)
@@ -165,7 +168,7 @@ class Insights:
                 self._hit("location", "", e, info["loc"])
             m = ANY_PLACE.search(path)
             if m:
-                key = m.lastgroup
+                key = tag = m.lastgroup
                 place = self.places[key]
                 place["total"] += 1
                 if e["plat"]:
@@ -184,12 +187,22 @@ class Insights:
                         if info["loc"] in ("high", "medium"):
                             sev = ESCALATE.get(sev, sev)
                         self._hit("place", key, e, sev)
+                        if sev == "low" and key in ("documents", "icloud"):
+                            sev = None  # counted in Insights, but too common to flag in the live list
             elif not e["plat"]:
                 m2 = LIB_AREA.match(path)
                 if m2 and not SHARED_AREA.match(m2.group(2)) and not self._owns(info, m2.group(2)):
-                    self._hit("crossapp", m2.group(1) + "/" + m2.group(2), e, "medium")
+                    tag, sev = "crossapp", "medium"
+                    self._hit("crossapp", m2.group(1) + "/" + m2.group(2), e, sev)
             if e["ff"] & 2 and PERSIST.search(path):
-                self._hit("persist", "", e, "medium" if e["plat"] else "high")
+                tag, sev = "persist", "medium" if e["plat"] else "high"
+                self._hit("persist", "", e, sev)
+            if sev in ("high", "medium"):
+                self.flagged += 1
+        if tag:
+            e["tag"] = tag
+        if sev:
+            e["sev"] = sev
 
     def snapshot(self):
         with self.lock:
@@ -212,8 +225,8 @@ class Insights:
                 apps = sorted(({"name": self.exes[x]["name"], "count": a["count"], "writes": a["writes"], "own": not a["other"]}
                                for x, a in p["apps"].items()), key=lambda a: -a["count"])[:8]
                 places.append({"key": key, "label": label, "sev": sev, "total": p["total"], "apple": p["apple"], "apps": apps})
-            out = {"since": self.started * 1000, "events": self.events, "programs": len(self.exes),
-                   "findings": findings, "places": places}
+            out = {"since": self.started * 1000, "events": self.events, "flagged": self.flagged,
+                   "programs": len(self.exes), "findings": findings, "places": places}
         findings.sort(key=lambda f: (SEV_RANK[f["sev"]], -f["count"]))
         return out
 
@@ -236,10 +249,10 @@ class Hub:
         self.status = {"state": "starting", "message": ""}
 
     def push(self, ev):
+        self.insights.add(ev)  # first, so the event carries its tag to the browser
         with self.lock:
             self.pending.append(ev)
             self.total += 1
-        self.insights.add(ev)
 
     def set_status(self, state, message=""):
         self.status = {"state": state, "message": message}
@@ -273,7 +286,7 @@ class Hub:
                 self.ui_dropped += len(batch) - MAX_PER_BATCH
                 batch = batch[-MAX_PER_BATCH:]
             self.broadcast(json.dumps({
-                "type": "batch", "events": batch, "total": self.total,
+                "type": "batch", "events": batch, "total": self.total, "flagged": self.insights.flagged,
                 "esDropped": self.es_dropped, "uiDropped": self.ui_dropped,
             }, separators=(",", ":")))
 
@@ -738,7 +751,7 @@ header{display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:
 .tbadge{min-width:17px;height:17px;padding:0 5px;border-radius:999px;background:var(--red);color:#fff;font-size:10.5px;font-weight:700;
   display:inline-grid;place-items:center}
 .tbadge.med{background:var(--amber)}
-.search{flex:1;max-width:520px;position:relative;display:block}
+.search{flex:1;min-width:200px;max-width:440px;position:relative;display:block}
 .search input{width:100%;height:34px;border:1px solid var(--line2);border-radius:10px;padding:0 34px 0 34px;font:13px var(--sans);
   color:var(--text);background:#fff;outline:none;transition:border-color .15s,box-shadow .15s}
 .search input::placeholder{color:#a3adbb}
@@ -868,75 +881,103 @@ aside{overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px;b
 .actions{display:flex;flex-direction:column;gap:8px}
 .actions .btn{justify-content:center;height:34px}
 
+/* live-list flags */
+.c-path .tag{flex:none;margin-left:auto;padding:1px 8px;border-radius:999px;font:600 10.5px var(--sans);background:#f1f5f9;color:#64748b}
+.c-path .file + .tag{margin-left:auto}
+.c-path .tag.high{background:#fee2e2;color:#b91c1c}
+.c-path .tag.medium{background:#ffedd5;color:#c2410c}
+.row.flag-high{box-shadow:inset 3px 0 0 var(--red)}
+.row.flag-medium{box-shadow:inset 3px 0 0 var(--amber)}
+.row.flag-high .pn{color:#b91c1c}
+.stat.flagged-stat .v{color:var(--red)}
+.flagchip i{width:7px;height:7px;border-radius:50%;background:var(--red);display:inline-block}
+.chip.on.flagchip{background:var(--red);border-color:var(--red)}
+.chip.on.flagchip i{background:#fff}
+.flagbox{border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:12.5px;line-height:1.5}
+.flagbox b{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
+.flagbox.high{background:#fef2f2;color:#7f1d1d}
+.flagbox.medium{background:#fff7ed;color:#7c2d12}
+.flagbox.low{background:#f8fafc;color:#475569}
+
 /* insights */
 #insights{flex:1;overflow-y:auto;background:#fbfbfc}
-.ins-wrap{max-width:1080px;margin:0 auto;padding:24px 24px 60px}
-.ins-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:18px}
+.ins-wrap{max-width:980px;margin:0 auto;padding:26px 24px 60px}
+.ins-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:16px}
 .ins-head h2{margin:0;font-size:20px;font-weight:700;letter-spacing:-.02em}
 .ins-sub{color:var(--muted);font-size:12.5px;margin-top:3px}
-.verdict{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:#fff;margin-bottom:22px}
-.verdict .vi{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:17px;flex:none}
+.how{display:flex;gap:10px;margin-bottom:14px}
+.how > div{flex:1;display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 13px;font-size:12.5px;color:#475569;line-height:1.45}
+.how b{display:block;color:var(--text);margin-bottom:1px}
+.how .n{flex:none;width:22px;height:22px;border-radius:7px;background:#f1f5f9;color:#475569;font-weight:700;font-size:11.5px;display:grid;place-items:center}
+.verdict{display:flex;align-items:center;gap:14px;padding:16px 18px;border-radius:14px;border:1px solid var(--line);background:#fff}
+.verdict .vi{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:18px;font-weight:700;flex:none}
 .verdict.ok .vi{background:#ecfdf3;color:var(--green)}
 .verdict.warn .vi{background:#fff7ed;color:var(--amber)}
-.verdict.bad .vi{background:#fef2f2;color:var(--red)}
-.verdict b{font-size:14px}
-.verdict .vs{color:var(--muted);font-size:12.5px;margin-top:1px}
-.ins-wrap h3{font-size:12px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:26px 0 10px}
-.fcard{background:#fff;border:1px solid var(--line);border-left:3px solid var(--line2);border-radius:12px;padding:13px 16px;margin-bottom:10px}
-.fcard.high{border-left-color:var(--red)}
-.fcard.medium{border-left-color:var(--amber)}
-.fcard.low{border-left-color:#cbd5e1}
-.fhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.sev{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:2px 7px;border-radius:6px}
+.verdict.bad{border-color:#fecaca;background:#fffafa}
+.verdict.bad .vi{background:#fee2e2;color:var(--red)}
+.verdict b{font-size:15.5px;letter-spacing:-.01em}
+.verdict .vs{color:var(--muted);font-size:12.5px;margin-top:2px}
+.ins-wrap h3{font-size:11.5px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:24px 0 10px}
+.appcard{background:#fff;border:1px solid var(--line);border-left:4px solid var(--line2);border-radius:14px;padding:15px 18px 13px;margin-bottom:10px}
+.appcard.high{border-left-color:var(--red)}
+.appcard.medium{border-left-color:var(--amber)}
+.ac-top{display:flex;align-items:center;gap:12px}
+.ac-top .av{width:34px;height:34px;border-radius:10px;font-size:15px}
+.ac-name{font-size:15px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+.ac-who{font-size:12.5px;color:var(--muted);margin-top:1px;word-break:break-all}
+.ac-who .bad{color:#b91c1c;font-weight:550}
+.ac-meta{margin-left:auto;font-size:12px;color:var(--faint);white-space:nowrap;align-self:flex-start}
+.ac-sum{font-size:13.5px;margin:10px 0 9px;line-height:1.45}
+.chips2{display:flex;flex-wrap:wrap;gap:6px}
+.pchip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;background:#f1f5f9;color:#475569}
+.pchip i{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block}
+.pchip span{font-weight:500;opacity:.7}
+.pchip.high{background:#fef2f2;color:#b91c1c}
+.pchip.medium{background:#fff7ed;color:#b45309}
+.ac-foot{display:flex;gap:16px;align-items:center;margin-top:11px}
+.linkbtn{border:0;background:none;color:var(--accent);font-size:12.5px;font-weight:550;cursor:pointer;padding:0}
+.ac-files{margin-top:9px;font:11.5px/1.7 var(--mono);color:#64748b;background:#f8fafc;border-radius:9px;padding:8px 11px;word-break:break-all}
+.ac-files b{font:600 11.5px var(--sans);color:#475569}
+.sev{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:2px 7px;border-radius:6px}
 .sev.high{background:#fef2f2;color:#b91c1c}.sev.medium{background:#fff7ed;color:#b45309}.sev.low{background:#f1f5f9;color:#64748b}
-.ftitle{font-weight:650;font-size:13.5px}
-.fmeta{margin-left:auto;color:var(--faint);font-size:12px;white-space:nowrap}
-.fwhy{color:#475569;font-size:12.5px;margin-top:5px}
-.fwho{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:8px;word-break:break-all}
-.fwho .mono{color:#475569}
-.fex{margin-top:7px;font:11.5px/1.6 var(--mono);color:#64748b;background:#f8fafc;border-radius:8px;padding:7px 10px;word-break:break-all}
-.fact{margin-top:8px;display:flex;gap:6px}
-.fact .mini{margin-top:0}
-.morebtn{border:0;background:none;color:var(--accent);font-size:12.5px;font-weight:550;cursor:pointer;padding:6px 0}
-.places{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px}
-.place{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 15px}
+.morebtn{border:0;background:none;color:var(--accent);font-size:12.5px;font-weight:550;cursor:pointer;padding:8px 0}
+.places{display:grid;grid-template-columns:repeat(auto-fill,minmax(225px,1fr));gap:8px}
+.place{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 13px}
 .pl-top{display:flex;align-items:center;gap:8px}
-.pl-top b{font-size:13px}
-.pl-st{margin-left:auto;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.pl-top b{font-size:12.5px}
+.pl-st{margin-left:auto;font-size:11px;font-weight:650;padding:2px 8px;border-radius:999px;white-space:nowrap}
 .place.ok .pl-st{background:#ecfdf3;color:#15803d}
 .place.warn .pl-st{background:#fff7ed;color:#b45309}
+.place.bad{border-color:#fecaca}
 .place.bad .pl-st{background:#fef2f2;color:#b91c1c}
 .place.idle .pl-st{background:#f4f6f8;color:var(--faint)}
 .place.note .pl-st{background:#f1f5f9;color:#475569}
-.pl-desc{color:var(--muted);font-size:12px;margin-top:3px}
-.pl-apps{margin-top:9px;display:flex;flex-direction:column;gap:5px}
-.pl-app{display:flex;align-items:center;gap:8px;font-size:12.5px}
-.pl-app .av{width:18px;height:18px;font-size:9.5px;border-radius:5px}
-.pl-app .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pl-app .c{margin-left:auto;color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap}
-.own{font-size:10.5px;color:var(--faint);border:1px solid var(--line2);border-radius:5px;padding:0 5px;white-space:nowrap}
-.pl-apple{color:var(--faint);font-size:12px;margin-top:8px}
+.pl-apps{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px 10px}
+.pl-app{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#334155}
+.pl-app .av{width:16px;height:16px;font-size:9px;border-radius:5px}
+.pl-app.own{color:var(--faint)}
 .ins-note{color:var(--faint);font-size:12px;line-height:1.6;margin-top:28px}
 
-@media (max-width:1100px){main{grid-template-columns:1fr}aside{display:none}.stat:nth-child(3){display:none}}
-@media (max-width:820px){.thead,.row{grid-template-columns:84px 170px 40px minmax(0,1fr)}.chips{display:none}}
+@media (max-width:1100px){main{grid-template-columns:1fr}aside{display:none}.stat.procs{display:none}}
+@media (max-width:820px){.thead,.row{grid-template-columns:84px 170px 40px minmax(0,1fr)}.chips{display:none}.how{flex-direction:column}}
 </style>
 </head>
 <body>
 <header>
-  <div class="brand"><span class="dot" id="dot"></span><b>File Opens</b><span class="state" id="stateLabel">Connecting…</span></div>
+  <div class="brand"><span class="dot" id="dot"></span><b>esopen</b><span class="state" id="stateLabel">Connecting…</span></div>
   <div class="tabs">
     <button class="tab on" data-tab="live">Live</button>
     <button class="tab" data-tab="insights">Insights <span class="tbadge" id="insBadge" hidden></span></button>
   </div>
   <label class="search live-only">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <input id="q" placeholder='Filter…   Slack   -mds   proc:"Code Helper"   path:~/Documents   pid:123' spellcheck="false" autocomplete="off">
+    <input id="q" placeholder='Filter…  e.g. Slack  -mds  proc:"Code Helper"' spellcheck="false" autocomplete="off">
     <kbd>/</kbd>
   </label>
   <div class="chips live-only">
-    <button class="chip" id="tWrites" title="Only opens that ask for write access">Writes only</button>
+    <button class="chip flagchip" id="tFlag" title="Only show apps (not Apple's own) opening your private data"><i></i>Flagged only</button>
     <button class="chip" id="tApple" title="Hide Apple platform binaries (system daemons, Finder, Safari…)">Hide Apple</button>
+    <button class="chip" id="tWrites" title="Only opens that ask for write access">Writes only</button>
   </div>
   <div class="grow"></div>
   <button class="btn live-only" id="pause" title="Pause / resume (Space)"></button>
@@ -946,8 +987,9 @@ aside{overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px;b
 <div class="banner" id="banner"></div>
 <section class="stats">
   <div class="stat"><div class="k">Events / sec</div><div class="v" id="sRate">0</div></div>
+  <div class="stat flagged-stat" title="Opens of private data by apps that aren't Apple's (medium or high)"><div class="k">Flagged</div><div class="v" id="sFlag">0</div></div>
   <div class="stat"><div class="k">Matching / sec</div><div class="v accent" id="sMatch">0</div></div>
-  <div class="stat"><div class="k">Processes · 30s</div><div class="v" id="sProcs">0</div></div>
+  <div class="stat procs"><div class="k">Processes · 30s</div><div class="v" id="sProcs">0</div></div>
   <div class="stat"><div class="k">Total seen</div><div class="v" id="sTotal">0</div></div>
   <div class="stat warn" id="dropStat" hidden><div class="k">Dropped</div><div class="v" id="sDrop">0</div></div>
   <div class="sparkwrap">
@@ -968,7 +1010,7 @@ aside{overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px;b
   <aside>
     <div class="card"><h3>Top processes <span>last 30s</span></h3><div class="top" id="topProcs"></div></div>
     <div class="card"><h3>Top files <span>last 30s</span></h3><div class="top" id="topFiles"></div></div>
-    <div class="hint">Click a row for details. Click a process or file on the right to filter to it, or <b>⊘</b> to hide it.
+    <div class="hint">Red and orange tags mark apps opening your private data. Click a row to see why. Click a process or file on the right to filter to it, or <b>⊘</b> to hide it.
       Prefix a term with <code>-</code> to exclude it. Press <code>Space</code> to pause, <code>/</code> to search.</div>
   </aside>
   <div class="drawer" id="drawer"></div>
@@ -980,12 +1022,16 @@ aside{overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px;b
       <div class="grow"></div>
       <button class="btn" id="insReset" title="Forget everything collected so far and start over">Start over</button>
     </div>
+    <div class="how">
+      <div><span class="n">1</span><span><b>Watches</b>every file your Mac opens, from every app, using Apple's Endpoint Security.</span></div>
+      <div><span class="n">2</span><span><b>Checks</b>each one against your private places: messages, passwords, wallets, keys and startup files.</span></div>
+      <div><span class="n">3</span><span><b>Flags</b>apps that aren't Apple's and aren't just opening their own data.</span></div>
+    </div>
     <div class="verdict" id="verdict"></div>
-    <h3>Findings</h3>
-    <div id="insFindings"></div>
-    <h3>Sensitive places</h3>
+    <div id="insApps"></div>
+    <h3>Your private places</h3>
     <div class="places" id="insPlaces"></div>
-    <div class="ins-note">Insights cover everything since esopen started (or since you clicked “Start over”), not just what's in the live list.
+    <div class="ins-note">Covers everything since esopen started (or since you clicked “Start over”), not just what's in the live list.
       macOS reports attempts it blocked too, so an entry means an app <i>tried</i> to open the file, not necessarily that it succeeded.
       File activity can't show screen recording, keystroke monitoring or network traffic. Check those in System Settings → Privacy &amp; Security.</div>
   </div>
@@ -1004,7 +1050,7 @@ let paused = false, pauseSeq = Infinity, pausedNew = 0;
 let following = true, unseen = 0, selected = null, tab = 'live';
 const buckets = new Map(), procSeen = new Map(), rowEls = new Map();
 
-const prefs = { q: '', writes: false, hideApple: false };
+const prefs = { q: '', writes: false, hideApple: false, flagged: false };
 try { Object.assign(prefs, JSON.parse(localStorage.getItem('esopen.prefs') || '{}')); } catch (_) {}
 const savePrefs = () => { try { localStorage.setItem('esopen.prefs', JSON.stringify(prefs)); } catch (_) {} };
 
@@ -1034,6 +1080,8 @@ const FLAGS = [[0x1, 'FREAD'], [0x2, 'FWRITE'], [0x4, 'O_NONBLOCK'], [0x8, 'O_AP
   [0x40, 'O_ASYNC'], [0x80, 'O_FSYNC'], [0x100, 'O_NOFOLLOW'], [0x200, 'O_CREAT'], [0x400, 'O_TRUNC'], [0x800, 'O_EXCL'],
   [0x8000, 'O_EVTONLY'], [0x20000, 'O_NOCTTY'], [0x100000, 'O_DIRECTORY'], [0x200000, 'O_SYMLINK'], [0x1000000, 'O_CLOEXEC']];
 const HOT = new Set(['FWRITE', 'O_APPEND', 'O_CREAT', 'O_TRUNC']);
+const TAG_LABEL = { messages: 'Messages', tcc: 'Privacy DB', browser: 'Passwords', wallets: 'Wallet', secrets: 'Keys', photos: 'Photos',
+  keychain: 'Keychain', documents: 'Documents', icloud: 'iCloud', crossapp: "Other app's data", persist: 'Startup file' };
 function clock(ts) {
   const d = new Date(ts), p = n => String(n).padStart(2, '0');
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}<span class="ms">.${String(d.getMilliseconds()).padStart(3, '0')}</span>`;
@@ -1060,6 +1108,7 @@ function compileQuery() {
   }
 }
 function matches(e) {
+  if (prefs.flagged && !(e.sev === 'high' || e.sev === 'medium')) return false;
   if (prefs.writes && !(e.ff & 2)) return false;
   if (prefs.hideApple && e.plat) return false;
   for (const t of tokens) {
@@ -1075,6 +1124,7 @@ function applyFilters() {
   prefs.q = qInput.value; savePrefs(); compileQuery();
   $('tWrites').classList.toggle('on', prefs.writes);
   $('tApple').classList.toggle('on', prefs.hideApple);
+  $('tFlag').classList.toggle('on', prefs.flagged);
   rebuildView();
 }
 function addTerm(t) { qInput.value = (qInput.value.trim() + ' ' + t).trim(); applyFilters(); }
@@ -1127,13 +1177,13 @@ function rebuildView() {
 // ---------------------------------------------------------------- virtual list
 function makeRow(e, fresh) {
   const el = document.createElement('div');
-  el.className = 'row' + (fresh ? ' fresh' : '');
+  el.className = 'row' + (fresh ? ' fresh' : '') + (e.sev === 'high' || e.sev === 'medium' ? ' flag-' + e.sev : '');
   el._e = e;
   const [dir, file] = splitPath(e.path), [ml, mc] = modeOf(e.ff);
   el.innerHTML = `<div class="c-time">${clock(e.ts)}</div>`
     + `<div class="c-proc">${avatar(e.name)}<span class="pn">${esc(e.name)}</span><span class="pid">${e.pid == null ? '' : e.pid}</span></div>`
     + `<div><span class="badge ${mc}">${ml}</span></div>`
-    + `<div class="c-path" title="${esc(e.path)}"><span class="dir">${esc(dir)}</span><span class="file">${esc(file)}</span></div>`;
+    + `<div class="c-path" title="${esc(e.path)}"><span class="dir">${esc(dir)}</span><span class="file">${esc(file)}</span>${e.sev ? `<span class="tag ${e.sev}">${esc(TAG_LABEL[e.tag] || e.tag)}</span>` : ''}</div>`;
   return el;
 }
 function render(slideBy = 0) {
@@ -1253,6 +1303,7 @@ function openDrawer(e) {
     <div class="dh">${avatar(e.name)}<div style="min-width:0"><div class="dn">${esc(e.name)}</div>
       <div class="ds">pid ${e.pid == null ? '?' : e.pid} · ${esc(e.user == null ? e.uid : e.user)}</div></div>
       <button class="x" data-act="close" title="Close (Esc)">×</button></div>
+    ${e.sev ? flagBox(e) : ''}
     <div class="sec"><div class="lbl">File</div>
       <div class="pathbox"><span class="dir">${esc(dir)}</span><b>${esc(file)}</b></div>
       <button class="mini" data-act="copy">Copy full path</button></div>
@@ -1292,9 +1343,9 @@ drawer.addEventListener('click', ev => {
 
 // ---------------------------------------------------------------- export
 function exportCsv() {
-  const rows = [['time', 'pid', 'process', 'executable', 'team_id', 'apple', 'user', 'mode', 'fflag', 'path']];
+  const rows = [['time', 'pid', 'process', 'executable', 'team_id', 'apple', 'user', 'mode', 'fflag', 'flag', 'path']];
   for (const e of view) rows.push([new Date(e.ts).toISOString(), e.pid, e.name, e.exe, e.team || '', e.plat ? 'yes' : 'no',
-    e.user, modeOf(e.ff)[0], '0x' + (e.ff >>> 0).toString(16), e.path]);
+    e.user, modeOf(e.ff)[0], '0x' + (e.ff >>> 0).toString(16), e.sev ? e.sev + ':' + e.tag : '', e.path]);
   const cell = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const blob = new Blob([rows.map(r => r.map(cell).join(',')).join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
@@ -1306,6 +1357,12 @@ function exportCsv() {
 
 // ---------------------------------------------------------------- insights
 let ins = null, showLow = false;
+const expanded = new Set();
+const RANK = { high: 0, medium: 1, low: 2 };
+const PLACE_CHIP = { messages: 'Messages & Mail', tcc: 'Privacy settings', browser: 'Passwords & cookies', wallets: 'Crypto wallets',
+  secrets: 'SSH & API keys', photos: 'Photos', keychain: 'Keychain', documents: 'Documents', icloud: 'iCloud Drive' };
+const PLACE_WHAT = { messages: 'messages & mail', tcc: 'privacy settings', browser: 'browser passwords', wallets: 'crypto wallets',
+  secrets: 'SSH & API keys', photos: 'photos', keychain: 'keychain', documents: 'documents', icloud: 'iCloud files' };
 const WHY = {
   'place:messages': 'Reading these needs Full Disk Access. If you didn’t expect this app to touch your messages or mail, remove its Full Disk Access.',
   'place:tcc': 'Apps sometimes read this to check whether they have Full Disk Access. An app you don’t recognize doing it is worth a look.',
@@ -1320,70 +1377,125 @@ const WHY = {
   'location': 'Real apps usually live in /Applications. Programs running from hidden or temporary folders are a common malware trick.',
   'persist': 'Startup files make programs run automatically. Make sure you recognize this change.',
 };
-function findingTitle(f) {
-  if (f.kind === 'place') return `${f.name} ${f.writes ? 'opened and changed' : 'opened'} your ${f.what}`;
-  if (f.kind === 'crossapp') return `${f.name} opened another app's data (${f.key.split('/').pop()})`;
-  if (f.kind === 'location') return `${f.name} runs from an unusual location${f.signed ? '' : ' and has no developer signature'}`;
-  if (f.kind === 'persist') return `${f.name} changed a startup file`;
-  return f.name;
+const listJoin = a => a.length < 2 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const areaName = key => key.split('/').pop();
+
+function flagBox(e) {
+  const what = e.tag === 'persist' ? `${e.name} changed a file that makes programs start automatically.`
+    : e.tag === 'crossapp' ? `${e.name} opened another app's private data.`
+    : `${e.name} isn't an Apple program, and it opened your ${PLACE_WHAT[e.tag] || 'private data'}.`;
+  const why = WHY[e.tag === 'persist' || e.tag === 'crossapp' ? e.tag : 'place:' + e.tag] || '';
+  return `<div class="flagbox ${e.sev}"><b>Why this is flagged</b>${esc(what)} ${esc(why)}</div>`;
 }
-function findingCard(f) {
-  const why = WHY[f.kind === 'place' ? 'place:' + f.key : f.kind] || '';
-  const who = f.signer && !/^(No developer|Not signed)/.test(f.signer) ? 'signed by ' + esc(f.signer)
-    : f.team ? 'team ID ' + esc(f.team) : 'no developer signature';
-  const ex = f.kind === 'location' ? [] : f.examples;
-  return `<div class="fcard ${f.sev}">
-    <div class="fhead"><span class="sev ${f.sev}">${f.sev}</span><span class="ftitle">${esc(findingTitle(f))}</span>
-      <span class="fmeta">${fmt(f.count)}× · last ${ago(f.last)}</span></div>
-    <div class="fwhy">${esc(why)}</div>
-    <div class="fwho">${avatar(f.name, 'av')}<span><span class="mono">${esc(tilde(f.exe))}</span> · ${who}</span></div>
-    ${ex.length ? `<div class="fex">${ex.map(p => esc(tilde(p))).join('<br>')}</div>` : ''}
-    <div class="fact"><button class="mini" data-show="${esc(f.name)}">Show in live view</button></div>
+
+// One entry per program, combining everything it was flagged for.
+function groupApps(findings) {
+  const by = new Map();
+  for (const f of findings) {
+    let g = by.get(f.exe);
+    if (!g) by.set(f.exe, g = { exe: f.exe, name: f.name, signer: f.signer, team: f.team, signed: f.signed, sev: 'low',
+      count: 0, last: 0, places: [], persist: null, cross: [], loc: null });
+    if (RANK[f.sev] < RANK[g.sev]) g.sev = f.sev;
+    if (f.kind !== 'location') g.count += f.count;
+    g.last = Math.max(g.last, f.last);
+    if (f.kind === 'place') g.places.push(f);
+    else if (f.kind === 'persist') g.persist = f;
+    else if (f.kind === 'crossapp') g.cross.push(f);
+    else if (f.kind === 'location') g.loc = f;
+  }
+  const apps = [...by.values()];
+  const highs = g => g.places.filter(p => p.sev === 'high').length + (g.persist && g.persist.sev === 'high' ? 1 : 0);
+  for (const g of apps) g.places.sort((a, b) => RANK[a.sev] - RANK[b.sev] || b.count - a.count);
+  return apps.sort((a, b) => RANK[a.sev] - RANK[b.sev] || highs(b) - highs(a) || b.count - a.count);
+}
+function appSummary(g) {
+  const parts = [];
+  if (g.places.length) parts.push('opened your ' + listJoin(g.places.map(p => PLACE_WHAT[p.key])));
+  if (g.cross.length) parts.push(`read other apps' data (${listJoin(g.cross.map(c => areaName(c.key)))})`);
+  if (g.persist) parts.push('changed a startup file' + (g.persist.examples[0] ? ` (${baseName(g.persist.examples[0])})` : ''));
+  if (!parts.length && g.loc) parts.push(`runs from an unusual place${g.signed ? '' : ' with no developer signature'}`);
+  const s = parts.length > 1 ? parts.slice(0, -1).join(', ') + ', and ' + parts[parts.length - 1] : parts[0] || '';
+  return s.charAt(0).toUpperCase() + s.slice(1) + '.';
+}
+function whoLine(g) {
+  const signed = g.signer && !/^(No developer|Not signed)/.test(g.signer);
+  const who = signed ? `Made by ${esc(g.signer.replace(/\s*\([A-Z0-9]{10}\)$/, ''))}`
+    : g.team ? `Team ID ${esc(g.team)}` : '<span class="bad">Not signed by any developer</span>';
+  const dir = tilde(g.exe.slice(0, g.exe.lastIndexOf('/') + 1));
+  const where = g.loc ? ` · runs from <span class="${g.loc.sev === 'high' ? 'bad' : ''}">${esc(dir)}</span>` : '';
+  return who + where;
+}
+function appCard(g) {
+  const chips = [...g.places.map(p => [p.sev, PLACE_CHIP[p.key], p.count]),
+    ...(g.persist ? [[g.persist.sev, 'Startup file', g.persist.count]] : []),
+    ...g.cross.map(c => [c.sev, areaName(c.key) + ' data', c.count])]
+    .map(([sev, label, n]) => `<span class="pchip ${sev}"><i></i>${esc(label)} <span>${fmt(n)}×</span></span>`).join('');
+  const files = [...g.places.map(p => [PLACE_CHIP[p.key], p.examples]), ...(g.persist ? [['Startup file', g.persist.examples]] : []),
+    ...g.cross.map(c => [areaName(c.key) + ' data', c.examples])];
+  const open = expanded.has(g.exe);
+  return `<div class="appcard ${g.sev}">
+    <div class="ac-top">${avatar(g.name)}<div style="min-width:0">
+        <div class="ac-name">${esc(g.name)} <span class="sev ${g.sev}">${g.sev}</span></div>
+        <div class="ac-who">${whoLine(g)}</div></div>
+      <div class="ac-meta">${g.count ? fmt(g.count) + ' opens · ' : ''}last ${ago(g.last)}</div></div>
+    <div class="ac-sum">${esc(appSummary(g))}</div>
+    ${chips ? `<div class="chips2">${chips}</div>` : ''}
+    <div class="ac-foot">${files.length ? `<button class="linkbtn" data-files="${esc(g.exe)}">${open ? 'Hide files' : 'Show files'}</button>` : ''}
+      <button class="linkbtn" data-show="${esc(g.name)}">Show in live view →</button></div>
+    ${open && files.length ? `<div class="ac-files">${files.map(([l, ex]) => `<b>${esc(l)}</b><br>${ex.map(p => esc(tilde(p))).join('<br>')}`).join('<br>')}</div>` : ''}
   </div>`;
 }
 function placeTile(p) {
   const others = p.apps.filter(a => !a.own);
-  let cls = 'ok', st = p.total ? 'Only Apple' : 'Not touched';
-  if (!p.total) cls = 'idle';
-  if (others.length) { cls = { high: 'bad', medium: 'warn' }[p.sev] || 'note'; st = `${others.length} other app${others.length > 1 ? 's' : ''}`; }
-  else if (p.apps.length) st = 'Only its own apps';
-  const apps = p.apps.map(a => `<div class="pl-app">${avatar(a.name)}<span class="n">${esc(a.name)}</span>`
-    + `${a.own ? '<span class="own">its own data</span>' : ''}<span class="c">${fmt(a.count)}${a.writes ? ` · ${fmt(a.writes)} writes` : ''}</span></div>`).join('');
-  return `<div class="place ${cls}"><div class="pl-top"><b>${esc(p.label)}</b><span class="pl-st">${st}</span></div>
-    ${apps ? `<div class="pl-apps">${apps}</div>` : ''}
-    ${p.apple ? `<div class="pl-apple">+ ${fmt(p.apple)} opens by Apple system processes</div>` : ''}</div>`;
+  let cls = 'ok', st = 'Only Apple';
+  if (!p.total) { cls = 'idle'; st = 'Not touched'; }
+  else if (others.length) { cls = { high: 'bad', medium: 'warn' }[p.sev] || 'note'; st = plural(others.length, 'app'); }
+  else if (p.apps.length) st = 'Only their own apps';
+  const apps = p.apps.slice(0, 5).map(a => `<span class="pl-app${a.own ? ' own' : ''}">${avatar(a.name)}${esc(a.name)}</span>`).join('');
+  return `<div class="place ${cls}"><div class="pl-top"><b>${esc(p.label)}</b><span class="pl-st">${st}</span></div>${apps ? `<div class="pl-apps">${apps}</div>` : ''}</div>`;
 }
 function renderInsights() {
   if (!ins) return;
-  $('insSub').textContent = `Watching for ${duration(Date.now() - ins.since)} · ${fmt(ins.events)} file opens · ${fmt(ins.programs)} programs`;
-  const hi = ins.findings.filter(f => f.sev === 'high'), med = ins.findings.filter(f => f.sev === 'medium');
-  const low = ins.findings.filter(f => f.sev === 'low');
+  $('insSub').textContent = `Watching for ${duration(Date.now() - ins.since)} · ${fmt(ins.events)} file opens checked · ${fmt(ins.flagged)} flagged`;
+  const apps = groupApps(ins.findings);
+  const hi = apps.filter(g => g.sev === 'high'), med = apps.filter(g => g.sev === 'medium'), low = apps.filter(g => g.sev === 'low');
   const v = $('verdict');
-  if (hi.length) { v.className = 'verdict bad'; v.innerHTML = `<div class="vi">!</div><div><b>${hi.length} thing${hi.length > 1 ? 's' : ''} worth checking now</b><div class="vs">An app outside Apple's own touched something sensitive. Details below.</div></div>`; }
-  else if (med.length) { v.className = 'verdict warn'; v.innerHTML = `<div class="vi">?</div><div><b>Nothing alarming, ${med.length} thing${med.length > 1 ? 's' : ''} to glance at</b><div class="vs">Probably fine, but make sure you recognize them.</div></div>`; }
-  else { v.className = 'verdict ok'; v.innerHTML = `<div class="vi">✓</div><div><b>Nothing worrying so far</b><div class="vs">Keep esopen running while you use your Mac normally. Some apps only act every few minutes or hours.</div></div>`; }
-  let html = [...hi, ...med].map(findingCard).join('');
-  if (!hi.length && !med.length) html = '<div class="ins-sub" style="padding:4px 2px 8px">No high or medium findings.</div>';
-  if (low.length) {
-    html += `<button class="morebtn" id="toggleLow">${showLow ? 'Hide' : 'Show'} ${low.length} low-priority item${low.length > 1 ? 's' : ''}</button>`;
-    if (showLow) html += low.map(findingCard).join('');
+  if (hi.length) {
+    v.className = 'verdict bad';
+    v.innerHTML = `<div class="vi">!</div><div><b>${plural(hi.length, 'app')} ${hi.length === 1 ? 'is' : 'are'} touching your private data</b>`
+      + `<div class="vs">Here's what each one opened and who made it.${med.length ? ` ${plural(med.length, 'more app')} worth a glance below.` : ''}</div></div>`;
+  } else if (med.length) {
+    v.className = 'verdict warn';
+    v.innerHTML = `<div class="vi">?</div><div><b>Nothing alarming. ${plural(med.length, 'app')} worth a glance</b><div class="vs">Probably fine, but make sure you recognize ${med.length === 1 ? 'it' : 'them'}.</div></div>`;
+  } else {
+    v.className = 'verdict ok';
+    v.innerHTML = `<div class="vi">✓</div><div><b>Nothing worrying so far</b><div class="vs">Keep esopen running while you use your Mac normally. Some apps only act every few minutes or hours.</div></div>`;
   }
-  $('insFindings').innerHTML = html;
+  let html = (hi.length || med.length) ? '<h3>Apps to look at</h3>' + [...hi, ...med].map(appCard).join('') : '';
+  if (low.length) {
+    html += `<button class="morebtn" id="toggleLow">${showLow ? 'Hide' : 'Show'} ${plural(low.length, 'app')} with normal-looking activity</button>`;
+    if (showLow) html += low.map(appCard).join('');
+  }
+  $('insApps').innerHTML = html;
   $('insPlaces').innerHTML = ins.places.map(placeTile).join('');
 }
 async function loadInsights() {
   try { const r = await fetch('/insights'); ins = await r.json(); } catch (_) { return; }
-  const hi = ins.findings.filter(f => f.sev === 'high').length, med = ins.findings.filter(f => f.sev === 'medium').length;
+  const apps = groupApps(ins.findings);
+  const hi = apps.filter(g => g.sev === 'high').length, med = apps.filter(g => g.sev === 'medium').length;
   const badge = $('insBadge');
   badge.hidden = !(hi || med);
-  badge.textContent = hi || med;
+  badge.textContent = hi + med;
   badge.classList.toggle('med', !hi);
   if (tab === 'insights') renderInsights();
 }
-$('insFindings').addEventListener('click', ev => {
+$('insApps').addEventListener('click', ev => {
   if (ev.target.id === 'toggleLow') { showLow = !showLow; renderInsights(); return; }
+  const f = ev.target.closest('[data-files]');
+  if (f) { const k = f.dataset.files; expanded.has(k) ? expanded.delete(k) : expanded.add(k); renderInsights(); return; }
   const b = ev.target.closest('[data-show]');
-  if (b) { qInput.value = 'proc:' + quote(b.dataset.show); prefs.hideApple = false; setTab('live'); applyFilters(); }
+  if (b) { qInput.value = 'proc:' + quote(b.dataset.show); prefs.hideApple = false; prefs.flagged = false; setTab('live'); applyFilters(); }
 });
 $('insReset').addEventListener('click', async () => {
   await fetch('/insights/reset', { method: 'POST' }).catch(() => {});
@@ -1437,6 +1549,7 @@ $('clear').addEventListener('click', () => {
 });
 $('tWrites').addEventListener('click', () => { prefs.writes = !prefs.writes; applyFilters(); });
 $('tApple').addEventListener('click', () => { prefs.hideApple = !prefs.hideApple; applyFilters(); });
+$('tFlag').addEventListener('click', () => { prefs.flagged = !prefs.flagged; applyFilters(); });
 let qTimer;
 qInput.addEventListener('input', () => { clearTimeout(qTimer); qTimer = setTimeout(applyFilters, 120); });
 document.addEventListener('keydown', ev => {
@@ -1448,7 +1561,7 @@ document.addEventListener('keydown', ev => {
 });
 
 // ---------------------------------------------------------------- stats + sparkline
-const tw = { rate: [0, 0, $('sRate')], match: [0, 0, $('sMatch')], procs: [0, 0, $('sProcs')], total: [0, 0, $('sTotal')], drop: [0, 0, $('sDrop')] };
+const tw = { flag: [0, 0, $('sFlag')], rate: [0, 0, $('sRate')], match: [0, 0, $('sMatch')], procs: [0, 0, $('sProcs')], total: [0, 0, $('sTotal')], drop: [0, 0, $('sDrop')] };
 function computeRates() {
   const cur = Math.floor(Date.now() / SPARK_MS);
   let a = 0, m = 0;
@@ -1508,7 +1621,7 @@ function connect() {
   es.onmessage = ev => {
     const m = JSON.parse(ev.data);
     if (m.type === 'batch') {
-      tw.total[1] = m.total;
+      tw.total[1] = m.total; tw.flag[1] = m.flagged || 0;
       const dropped = (m.esDropped || 0) + (m.uiDropped || 0);
       tw.drop[1] = dropped; $('dropStat').hidden = !dropped;
       ingest(m.events);
@@ -1525,6 +1638,7 @@ qInput.value = prefs.q;
 compileQuery();
 $('tWrites').classList.toggle('on', prefs.writes);
 $('tApple').classList.toggle('on', prefs.hideApple);
+$('tFlag').classList.toggle('on', prefs.flagged);
 updateState(); render();
 setInterval(computeRates, 250);
 setInterval(computeTop, 1000);
